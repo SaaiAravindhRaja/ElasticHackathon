@@ -1,23 +1,24 @@
 import Link from 'next/link'
+import type { Route } from 'next'
 
-const tiles = [
+const tiles: { href: Route; title: string; desc: string }[] = [
   {
     href: '/chatbot',
     title: 'Sales-Optimized Support Bot',
     desc: 'Customer-facing chat with citations and upsell prompts.'
   },
   {
-    href: '/sales',
+    href: '/sales' as Route,
     title: 'Customer Pitching Assistant',
     desc: 'Live call co-pilot with competitor cards and coaching.'
   },
   {
-    href: '/support',
+    href: '/support' as Route,
     title: 'Support Prompting Agent',
     desc: 'Agent console with live transcription and smart suggestions.'
   },
   {
-    href: '/dashboard',
+    href: '/dashboard' as Route,
     title: 'Recommendations Dashboard',
     desc: 'Executive insights with cited sources and actions.'
   }
@@ -28,7 +29,7 @@ export default function Page() {
     <div className="py-8">
       <div className="mb-6 flex items-baseline justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">ElasticCX Suite</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Auralytics</h1>
           <p className="text-sm text-gray-600">UI-only prototype mapped to the PRD</p>
         </div>
         <Link href="/chatbot" className="btn btn-primary px-4 py-2">Open Support Bot</Link>
