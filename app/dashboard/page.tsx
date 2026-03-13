@@ -52,7 +52,7 @@ export default function Dashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: 'Based on all competitor reviews and market intelligence data, what are the top 3 strategic product improvements we should prioritize? Be specific and cite evidence.',
+          question: 'Based on all competitor reviews and market intelligence data, what are the top 3 strategic product improvements we should prioritize? Be specific and cite evidence.',
           mode: 'recommendations',
           output_format: 'text',
         }),

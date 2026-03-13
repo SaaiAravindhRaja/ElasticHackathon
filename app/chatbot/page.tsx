@@ -105,7 +105,7 @@ export default function ChatbotPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          query: userMsg,
+          question: userMsg,
           mode: 'support_bot',
           ...(conversationId ? { conversation_id: conversationId } : {}),
         }),
