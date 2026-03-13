@@ -1,6 +1,7 @@
 "use client";
 import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown from 'react-markdown'
 
 function Sidebar() {
   return (
@@ -265,8 +266,8 @@ export default function ChatbotPage() {
                         <span className="animate-bounce h-2 w-2 rounded-full bg-brand-blue opacity-60" style={{ animationDelay: '300ms' }} />
                       </span>
                     ) : (
-                      <div className="whitespace-pre-wrap">
-                        {m.content}
+                      <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-gray-800 prose-a:text-brand-blue prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded prose-pre:bg-gray-100 prose-pre:rounded-lg prose-li:my-0">
+                        <ReactMarkdown>{m.content}</ReactMarkdown>
                         {m.streaming && <Cursor />}
                       </div>
                     )}
