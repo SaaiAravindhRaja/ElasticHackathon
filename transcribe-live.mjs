@@ -47,6 +47,7 @@
 // ======================================================
 
 import { spawn } from "child_process";
+import { WebSocketServer } from "ws";
 import {
   TranscribeStreamingClient,
   StartStreamTranscriptionCommand,
@@ -55,6 +56,18 @@ import {
   BedrockRuntimeClient,
   ConverseCommand,
 } from "@aws-sdk/client-bedrock-runtime";
+
+// ── WebSocket server so the Auralytics UI can display live transcriptions ──
+const WS_PORT = 3001;
+const wss = new WebSocketServer({ port: WS_PORT });
+wss.on("listening", () => console.log(`WebSocket server running on ws://localhost:${WS_PORT}`));
+
+function broadcast(payload) {
+  const msg = JSON.stringify(payload);
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) client.send(msg);
+  });
+}
 
 const REGION = process.env.AWS_REGION || "us-east-1";
 
@@ -292,10 +305,12 @@ async function handleFinalTranscript(text) {
 
     seen.add(key);
     console.log(`🚨 ISSUE: ${issue}`);
+    broadcast({ type: "issue_detected", issue });
 
     try {
       const results = await searchCustomers(issue);
       printBackendResults(issue, results);
+      broadcast({ type: "search_results", issue, results: results.slice(0, 3) });
     } catch (err) {
       console.error("Customer search failed:", err.message);
     }
@@ -341,8 +356,10 @@ async function main() {
 
       if (result.IsPartial) {
         process.stdout.write(`\rPartial: ${text}      `);
+        broadcast({ type: "partial", text });
       } else {
         process.stdout.write("\n");
+        broadcast({ type: "final", text });
         queue = queue.then(() => handleFinalTranscript(text));
       }
     }
