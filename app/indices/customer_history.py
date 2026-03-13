@@ -23,6 +23,8 @@ MAPPING = {
             "subject": {"type": "text", "analyzer": "english"},
             "chunk_id": {"type": "integer"},
             "conversation_id": {"type": "keyword"},
+            "intent": {"type": "keyword"},
+            "topics": {"type": "keyword"},
         }
     },
 }

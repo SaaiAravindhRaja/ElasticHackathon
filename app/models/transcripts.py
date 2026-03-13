@@ -18,5 +18,6 @@ class TranscriptIngestRequest(BaseModel):
 
 class TranscriptIngestResponse(BaseModel):
     indexed: int
+    deduplicated: int = 0
     failed: int
     index: str

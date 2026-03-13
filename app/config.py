@@ -13,6 +13,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = 100
     embedding_model: str = "text-embedding-3-small"
     bulk_batch_size: int = 50
+    openai_model: str = "gpt-4o-mini"
+    rag_top_k: int = 8
+    api_key: str | None = None
 
 
 @lru_cache

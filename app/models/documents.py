@@ -13,4 +13,5 @@ class DocumentIngestRequest(BaseModel):
 class DocumentIngestResponse(BaseModel):
     document_id: str
     chunks_indexed: int
+    deduplicated: int = 0
     index: str

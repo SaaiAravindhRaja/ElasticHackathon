@@ -14,7 +14,7 @@ router = APIRouter(prefix="/ingest", tags=["ingest"])
 @router.post("/documents", response_model=DocumentIngestResponse)
 async def ingest_documents_json(payload: DocumentIngestRequest):
     """Ingest a document from JSON. Chunks, embeds, and indexes into company-knowledge-index."""
-    document_id, chunks = await ingest_service.ingest_document(
+    document_id, indexed, deduped = await ingest_service.ingest_document(
         title=payload.title,
         text=payload.text,
         doc_type=payload.doc_type,
@@ -23,7 +23,8 @@ async def ingest_documents_json(payload: DocumentIngestRequest):
     )
     return DocumentIngestResponse(
         document_id=document_id,
-        chunks_indexed=chunks,
+        chunks_indexed=indexed,
+        deduplicated=deduped,
         index="company-knowledge-index",
     )
 
@@ -48,7 +49,7 @@ async def ingest_documents_pdf(
     if not text.strip():
         raise HTTPException(status_code=422, detail="PDF appears to contain no extractable text")
 
-    document_id, chunks = await ingest_service.ingest_document(
+    document_id, indexed, deduped = await ingest_service.ingest_document(
         title=title,
         text=text,
         doc_type=doc_type,
@@ -56,27 +57,34 @@ async def ingest_documents_pdf(
     )
     return DocumentIngestResponse(
         document_id=document_id,
-        chunks_indexed=chunks,
+        chunks_indexed=indexed,
+        deduplicated=deduped,
         index="company-knowledge-index",
     )
 
 
 @router.post("/emails", response_model=EmailIngestResponse)
 async def ingest_emails(payload: EmailIngestRequest):
-    """Ingest an array of email objects into customer-history-index."""
-    success, failed = await ingest_service.ingest_emails(payload.emails)
-    return EmailIngestResponse(indexed=success, failed=failed, index="customer-history-index")
+    """Ingest an array of email objects. NLP-enriched with sentiment, intent, and topics."""
+    indexed, deduped, failed = await ingest_service.ingest_emails(payload.emails)
+    return EmailIngestResponse(
+        indexed=indexed, deduplicated=deduped, failed=failed, index="customer-history-index"
+    )
 
 
 @router.post("/transcripts", response_model=TranscriptIngestResponse)
 async def ingest_transcripts(payload: TranscriptIngestRequest):
-    """Ingest call or chat transcripts into customer-history-index."""
-    success, failed = await ingest_service.ingest_transcripts(payload.transcripts)
-    return TranscriptIngestResponse(indexed=success, failed=failed, index="customer-history-index")
+    """Ingest call or chat transcripts. NLP-enriched with sentiment, intent, and topics."""
+    indexed, deduped, failed = await ingest_service.ingest_transcripts(payload.transcripts)
+    return TranscriptIngestResponse(
+        indexed=indexed, deduplicated=deduped, failed=failed, index="customer-history-index"
+    )
 
 
 @router.post("/reviews", response_model=ReviewIngestResponse)
 async def ingest_reviews(payload: ReviewIngestRequest):
     """Ingest structured reviews (from scraper) into market-intelligence-index."""
-    success, failed = await ingest_service.ingest_reviews(payload.reviews)
-    return ReviewIngestResponse(indexed=success, failed=failed, index="market-intelligence-index")
+    indexed, deduped, failed = await ingest_service.ingest_reviews(payload.reviews)
+    return ReviewIngestResponse(
+        indexed=indexed, deduplicated=deduped, failed=failed, index="market-intelligence-index"
+    )

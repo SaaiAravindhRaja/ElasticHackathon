@@ -7,6 +7,9 @@ from app.indices.company_knowledge import INDEX_NAME as COMPANY_INDEX, MAPPING a
 from app.indices.market_intelligence import INDEX_NAME as MARKET_INDEX, MAPPING as MARKET_MAPPING
 from app.indices.customer_history import INDEX_NAME as HISTORY_INDEX, MAPPING as HISTORY_MAPPING
 from app.routers import ingest as ingest_router
+from app.routers import search as search_router
+from app.routers import ai as ai_router
+from app.routers import analytics as analytics_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 logger = logging.getLogger(__name__)
@@ -38,17 +41,22 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="ElasticCX Ingestion API",
+    title="ElasticCX API",
     description=(
-        "Data ingestion backend for ElasticCX. "
-        "Chunks, embeds, and indexes documents, emails, transcripts, and reviews "
-        "into Elasticsearch Cloud for hybrid BM25 + kNN search."
+        "AI-powered customer experience suite backend. "
+        "Ingest documents, emails, transcripts, and reviews. "
+        "Query with hybrid RRF search (BM25 + kNN). "
+        "Generate AI answers grounded in your data via POST /ai/query. "
+        "Analyze trends and competitive intelligence via GET /analytics/*."
     ),
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 app.include_router(ingest_router.router)
+app.include_router(search_router.router)
+app.include_router(ai_router.router)
+app.include_router(analytics_router.router)
 
 
 @app.get("/health", tags=["meta"])

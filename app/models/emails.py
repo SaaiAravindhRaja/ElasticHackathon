@@ -17,5 +17,6 @@ class EmailIngestRequest(BaseModel):
 
 class EmailIngestResponse(BaseModel):
     indexed: int
+    deduplicated: int = 0
     failed: int
     index: str

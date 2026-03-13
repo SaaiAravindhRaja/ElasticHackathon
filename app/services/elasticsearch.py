@@ -39,6 +39,55 @@ async def ensure_index(index_name: str, mapping: dict) -> None:
         logger.info(f"Index already exists: {index_name}")
 
 
+async def bulk_index_with_dedup(
+    index_name: str, documents: list[dict]
+) -> tuple[int, int, int]:
+    """
+    Bulk index using op_type='create'. Documents must have '_id' set.
+    Duplicate documents (409 conflict) are counted as deduplicated, not failed.
+    Returns (indexed, deduplicated, failed).
+    """
+    if not documents:
+        return 0, 0, 0
+
+    settings = get_settings()
+    client = get_es_client()
+
+    actions = [
+        {
+            "_op_type": "create",
+            "_index": index_name,
+            "_id": doc.get("_id"),
+            **{k: v for k, v in doc.items() if k != "_id"},
+        }
+        for doc in documents
+    ]
+
+    total_indexed = 0
+    total_deduped = 0
+    total_failed = 0
+    batch_size = settings.bulk_batch_size
+
+    for i in range(0, len(actions), batch_size):
+        batch = actions[i : i + batch_size]
+        ok, errors = await async_bulk(
+            client,
+            batch,
+            raise_on_error=False,
+            raise_on_exception=False,
+        )
+        total_indexed += ok
+        for error in errors:
+            op_result = error.get("create", {})
+            if op_result.get("status") == 409:
+                total_deduped += 1
+            else:
+                total_failed += 1
+                logger.warning(f"Bulk index error in {index_name}: {op_result}")
+
+    return total_indexed, total_deduped, total_failed
+
+
 async def bulk_index(index_name: str, documents: list[dict]) -> tuple[int, int]:
     """
     Bulk index documents. Returns (success_count, failed_count).
