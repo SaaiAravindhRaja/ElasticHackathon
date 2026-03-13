@@ -13,6 +13,7 @@ from app.routers import search as search_router
 from app.routers import ai as ai_router
 from app.routers import analytics as analytics_router
 from app.routers import alerts as alerts_router
+from app.routers import agent_builder as agent_builder_router
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s — %(message)s")
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ app.include_router(search_router.router)
 app.include_router(ai_router.router)
 app.include_router(analytics_router.router)
 app.include_router(alerts_router.router)
+app.include_router(agent_builder_router.router)
 
 
 @app.exception_handler(Exception)

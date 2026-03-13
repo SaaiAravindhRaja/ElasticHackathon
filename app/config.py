@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     es_url: str
     es_api_key: str
     openai_api_key: str
+    anthropic_api_key: str | None = None
 
     chunk_size: int = 800
     chunk_overlap: int = 100
