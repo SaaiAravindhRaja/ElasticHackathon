@@ -8,6 +8,9 @@ class Settings(BaseSettings):
     es_url: str
     es_api_key: str
     openai_api_key: str
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_region: str = "us-east-1"
 
     chunk_size: int = 800
     chunk_overlap: int = 100
