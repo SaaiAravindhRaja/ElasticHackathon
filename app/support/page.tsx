@@ -102,7 +102,7 @@ export default function SupportAgent() {
       const res = await fetch(`${API}/ai/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, mode: 'support_agent', output_format: 'json' }),
+        body: JSON.stringify({ question: q, mode: 'support_agent', output_format: 'json' }),
       })
       const data = await res.json()
 
