@@ -7,12 +7,13 @@ from typing import Any
 from app.config import get_settings
 from app.services.chunker import chunk_text
 from app.services.embedder import embed_texts
-from app.services.elasticsearch import bulk_index_with_dedup
+from app.services.elasticsearch import bulk_index_with_dedup, get_es_client
 from app.services.dedup import content_fingerprint
 from app.services import nlp
 from app.indices.company_knowledge import INDEX_NAME as COMPANY_INDEX
 from app.indices.market_intelligence import INDEX_NAME as MARKET_INDEX
 from app.indices.customer_history import INDEX_NAME as HISTORY_INDEX
+from app.indices.alerts import INDEX_NAME as ALERTS_INDEX
 from app.models.reviews import ReviewObject
 from app.models.emails import EmailObject
 from app.models.transcripts import TranscriptObject
@@ -38,6 +39,39 @@ def _sentiment_from_rating(rating: float | None) -> str:
     if rating >= 3.0:
         return "neutral"
     return "negative"
+
+
+async def _percolate_check(target_index: str, doc: dict) -> list[str]:
+    """
+    Match a document against all registered percolator alerts for this index.
+    Returns the names of triggered alerts. Never raises — errors are logged only.
+    """
+    try:
+        client = get_es_client()
+        response = await client.search(
+            index=ALERTS_INDEX,
+            body={
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"percolate": {"field": "query", "document": doc}}
+                        ],
+                        "filter": [
+                            {"term": {"target_index": target_index}}
+                        ],
+                    }
+                },
+                "_source": ["name"],
+                "size": 50,
+            },
+        )
+        triggered = [hit["_source"]["name"] for hit in response["hits"]["hits"]]
+        if triggered:
+            logger.info(f"Alerts triggered for {target_index}: {triggered}")
+        return triggered
+    except Exception as e:
+        logger.warning(f"Percolate check failed (non-blocking): {e}")
+        return []
 
 
 async def ingest_document(
@@ -81,6 +115,11 @@ async def ingest_document(
         )
 
     indexed, deduped, failed = await bulk_index_with_dedup(COMPANY_INDEX, docs)
+
+    # Percolate the first chunk (non-blocking — alerts fire on any new doc content)
+    if docs and indexed > 0:
+        await _percolate_check(COMPANY_INDEX, {k: v for k, v in docs[0].items() if k != "_id"})
+
     logger.info(
         f"Document '{title}': {indexed} indexed, {deduped} deduplicated, {failed} failed"
     )
@@ -118,7 +157,13 @@ async def ingest_reviews(reviews: list[ReviewObject]) -> tuple[int, int, int]:
             }
         )
 
-    return await bulk_index_with_dedup(MARKET_INDEX, docs)
+    indexed, deduped, failed = await bulk_index_with_dedup(MARKET_INDEX, docs)
+
+    # Percolate first doc to trigger any registered review alerts
+    if docs and indexed > 0:
+        await _percolate_check(MARKET_INDEX, {k: v for k, v in docs[0].items() if k != "_id"})
+
+    return indexed, deduped, failed
 
 
 async def ingest_emails(emails: list[EmailObject]) -> tuple[int, int, int]:
@@ -162,7 +207,12 @@ async def ingest_emails(emails: list[EmailObject]) -> tuple[int, int, int]:
                 }
             )
 
-    return await bulk_index_with_dedup(HISTORY_INDEX, all_docs)
+    indexed, deduped, failed = await bulk_index_with_dedup(HISTORY_INDEX, all_docs)
+
+    if all_docs and indexed > 0:
+        await _percolate_check(HISTORY_INDEX, {k: v for k, v in all_docs[0].items() if k != "_id"})
+
+    return indexed, deduped, failed
 
 
 async def ingest_transcripts(transcripts: list[TranscriptObject]) -> tuple[int, int, int]:
@@ -204,4 +254,9 @@ async def ingest_transcripts(transcripts: list[TranscriptObject]) -> tuple[int, 
                 }
             )
 
-    return await bulk_index_with_dedup(HISTORY_INDEX, all_docs)
+    indexed, deduped, failed = await bulk_index_with_dedup(HISTORY_INDEX, all_docs)
+
+    if all_docs and indexed > 0:
+        await _percolate_check(HISTORY_INDEX, {k: v for k, v in all_docs[0].items() if k != "_id"})
+
+    return indexed, deduped, failed

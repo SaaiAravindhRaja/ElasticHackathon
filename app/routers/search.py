@@ -31,10 +31,12 @@ async def search_reviews(
     source_site: str | None = Query(None, description="trustpilot | g2 | capterra"),
     min_rating: float | None = Query(None, ge=0.0, le=5.0, description="Minimum star rating"),
     top_k: int = Query(10, ge=1, le=50),
+    boost_recency: bool = Query(False, description="Boost recent reviews in ranking"),
 ):
     """
     Hybrid search across market-intelligence-index (Trustpilot/G2/Capterra reviews).
     Filter by company, sentiment, source site, or minimum rating.
+    Set boost_recency=true to rank recent reviews higher (gaussian decay, 30-day half-life).
     """
     filters: dict = {}
     if company:
@@ -45,7 +47,9 @@ async def search_reviews(
         filters["source_site"] = source_site
     if min_rating is not None:
         filters["min_rating"] = min_rating
-    return await hybrid_search(MARKET_INDEX, q, filters=filters or None, top_k=top_k)
+    return await hybrid_search(
+        MARKET_INDEX, q, filters=filters or None, top_k=top_k, boost_recency=boost_recency
+    )
 
 
 @router.get("/customers")

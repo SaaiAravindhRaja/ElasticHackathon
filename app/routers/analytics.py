@@ -1,10 +1,18 @@
+import json
+import time
+import asyncio
+import logging
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Query
 from app.services.elasticsearch import get_es_client
+from app.services.search import hybrid_search
+from app.services.embedder import get_openai_client
+from app.config import get_settings
 from app.indices.company_knowledge import INDEX_NAME as COMPANY_INDEX
 from app.indices.market_intelligence import INDEX_NAME as MARKET_INDEX
 from app.indices.customer_history import INDEX_NAME as HISTORY_INDEX
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 
@@ -250,3 +258,187 @@ async def avg_rating_trend(
     ]
 
     return {"company": company, "days": days, "buckets": buckets}
+
+
+@router.get("/emerging-topics")
+async def emerging_topics(
+    index: str = Query("reviews", description="'reviews' or 'customers'"),
+    days: int = Query(7, ge=1, le=90, description="Recent window in days"),
+    baseline_days: int = Query(30, ge=7, le=365, description="Baseline window in days"),
+    top_n: int = Query(20, ge=1, le=100),
+):
+    """
+    Topics that are suddenly trending upward relative to the baseline period.
+
+    Uses ES significant_text aggregation on two time windows and computes
+    the relative lift ratio: recent_frequency / baseline_frequency.
+    A lift_ratio > 2.0 means the topic appears twice as often recently.
+
+    This answers "what topics are NEWLY emerging?" not just "what's popular overall?"
+    """
+    client = get_es_client()
+    now = datetime.now(timezone.utc)
+    target_index = MARKET_INDEX if index == "reviews" else HISTORY_INDEX
+    time_field = "date" if index == "reviews" else "timestamp"
+    text_field = "review_text" if index == "reviews" else "raw_text"
+
+    recent_since = (now - timedelta(days=days)).isoformat()
+    baseline_since = (now - timedelta(days=days + baseline_days)).isoformat()
+    baseline_until = recent_since
+
+    # Run both windows in parallel
+    recent_resp, baseline_resp = await asyncio.gather(
+        client.search(
+            index=target_index,
+            body={
+                "size": 0,
+                "query": {"range": {time_field: {"gte": recent_since}}},
+                "aggs": {
+                    "keywords": {
+                        "significant_text": {"field": text_field, "size": top_n * 2}
+                    },
+                    "total": {"value_count": {"field": time_field}},
+                },
+            },
+        ),
+        client.search(
+            index=target_index,
+            body={
+                "size": 0,
+                "query": {"range": {time_field: {"gte": baseline_since, "lt": baseline_until}}},
+                "aggs": {
+                    "keywords": {
+                        "significant_text": {"field": text_field, "size": top_n * 2}
+                    },
+                    "total": {"value_count": {"field": time_field}},
+                },
+            },
+        ),
+    )
+
+    recent_total = max(recent_resp["aggregations"]["total"]["value"], 1)
+    baseline_total = max(baseline_resp["aggregations"]["total"]["value"], 1)
+
+    recent_terms = {
+        b["key"]: b["doc_count"]
+        for b in recent_resp["aggregations"]["keywords"]["buckets"]
+    }
+    baseline_terms = {
+        b["key"]: b["doc_count"]
+        for b in baseline_resp["aggregations"]["keywords"]["buckets"]
+    }
+
+    results = []
+    for term, recent_count in recent_terms.items():
+        baseline_count = baseline_terms.get(term, 0)
+        recent_freq = recent_count / recent_total
+        baseline_freq = baseline_count / baseline_total if baseline_total > 0 else 0
+        lift_ratio = recent_freq / (baseline_freq + 1e-9)
+        results.append(
+            {
+                "term": term,
+                "recent_count": recent_count,
+                "baseline_count": baseline_count,
+                "lift_ratio": round(lift_ratio, 2),
+            }
+        )
+
+    results.sort(key=lambda x: x["lift_ratio"], reverse=True)
+
+    return {
+        "index": index,
+        "recent_window_days": days,
+        "baseline_window_days": baseline_days,
+        "topics": results[:top_n],
+    }
+
+
+@router.get("/summary")
+async def company_summary(
+    company: str = Query(..., description="Company name to summarize"),
+    top_k: int = Query(20, ge=5, le=50, description="Number of reviews to analyze"),
+):
+    """
+    AI-generated executive intelligence brief for a company.
+
+    Performs hybrid RRF search across all indexed reviews for the company,
+    feeds the top results to the LLM, and returns a structured JSON summary:
+    overall_sentiment, avg_rating, key_themes, strengths, weaknesses, one_sentence_summary.
+
+    Perfect for a quick competitive intelligence briefing.
+    """
+    start = time.monotonic()
+    settings = get_settings()
+
+    # Hybrid search for this company's reviews
+    search_result = await hybrid_search(
+        MARKET_INDEX,
+        f"{company} customer experience product review",
+        filters={"company_name": company},
+        top_k=top_k,
+    )
+
+    hits = search_result.get("hits", [])
+    if not hits:
+        return {
+            "company": company,
+            "source_count": 0,
+            "summary": None,
+            "message": "No reviews found for this company.",
+            "latency_ms": int((time.monotonic() - start) * 1000),
+        }
+
+    # Build context from review snippets
+    snippets = []
+    total_rating = 0.0
+    rating_count = 0
+    for hit in hits:
+        text = hit.get("review_text", hit.get("text", ""))[:300]
+        rating = hit.get("rating")
+        source = hit.get("source_site", "unknown")
+        if text:
+            snippets.append(f"[{source}] {text}")
+        if rating is not None:
+            try:
+                total_rating += float(rating)
+                rating_count += 1
+            except (TypeError, ValueError):
+                pass
+
+    avg_rating = round(total_rating / rating_count, 2) if rating_count > 0 else None
+    context = "\n\n".join(snippets)
+
+    prompt = f"""You are a business analyst. Based on {len(hits)} customer reviews of {company},
+provide a structured intelligence brief.
+
+Return ONLY a JSON object with this schema:
+{{"overall_sentiment": "positive|mixed|negative", "avg_rating": {avg_rating or "null"}, "key_themes": ["theme1", "theme2", "theme3", "theme4", "theme5"], "strengths": ["strength1", "strength2", "strength3"], "weaknesses": ["weakness1", "weakness2", "weakness3"], "one_sentence_summary": "One sentence capturing the overall customer perception."}}
+
+REVIEWS:
+{context}"""
+
+    client = get_openai_client()
+    completion = await client.chat.completions.create(
+        model=settings.openai_model,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=600,
+        response_format={"type": "json_object"},
+    )
+
+    raw = completion.choices[0].message.content or "{}"
+    try:
+        summary = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning(f"Company summary JSON parse failed for {company}")
+        summary = {"one_sentence_summary": raw}
+
+    latency_ms = int((time.monotonic() - start) * 1000)
+    logger.info(f"Company summary for '{company}': {len(hits)} reviews analyzed in {latency_ms}ms")
+
+    return {
+        "company": company,
+        "source_count": len(hits),
+        "summary": summary,
+        "latency_ms": latency_ms,
+    }

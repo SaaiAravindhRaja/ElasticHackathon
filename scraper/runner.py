@@ -1,5 +1,5 @@
 """
-Orchestrates all review scrapers and POSTs collected reviews to the ingestion API.
+Orchestrates all review scrapers in parallel and POSTs collected reviews to the ingestion API.
 
 Usage:
     python -m scraper.runner
@@ -27,15 +27,19 @@ async def run(company: str, max_pages: int, api_url: str) -> None:
         CapterraScraper(company_name=company, max_pages=max_pages),
     ]
 
+    logger.info(f"Launching {len(scrapers)} scrapers in parallel for '{company}'")
+    scrape_results = await asyncio.gather(
+        *[scraper.scrape() for scraper in scrapers],
+        return_exceptions=True,
+    )
+
     all_reviews: list[RawReview] = []
-    for scraper in scrapers:
-        logger.info(f"Starting {scraper.source_site} scraper for '{company}'")
-        try:
-            reviews = await scraper.scrape()
-            logger.info(f"{scraper.source_site}: {len(reviews)} reviews")
-            all_reviews.extend(reviews)
-        except Exception as e:
-            logger.error(f"{scraper.source_site} scraper failed: {e}")
+    for scraper, result in zip(scrapers, scrape_results):
+        if isinstance(result, Exception):
+            logger.error(f"{scraper.source_site} scraper failed: {result}")
+        else:
+            logger.info(f"{scraper.source_site}: {len(result)} reviews")
+            all_reviews.extend(result)
 
     if not all_reviews:
         logger.warning("No reviews scraped — nothing to POST")
@@ -69,6 +73,7 @@ async def run(company: str, max_pages: int, api_url: str) -> None:
         result = response.json()
         logger.info(
             f"Ingest complete — indexed: {result.get('indexed')}, "
+            f"deduplicated: {result.get('deduplicated')}, "
             f"failed: {result.get('failed')}"
         )
 
