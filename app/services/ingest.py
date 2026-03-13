@@ -79,6 +79,7 @@ async def ingest_document(
     text: str,
     doc_type: str = "general",
     source_url: str | None = None,
+    company_name: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[str, int, int]:
     """
@@ -106,6 +107,7 @@ async def ingest_document(
                 "text_embedding": embedding,
                 "doc_type": doc_type,
                 "source_url": source_url,
+                "company_name": company_name,
                 "metadata": metadata or {},
                 "timestamp": now,
                 "chunk_id": chunk.chunk_id,
