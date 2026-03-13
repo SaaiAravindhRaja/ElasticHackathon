@@ -1,7 +1,29 @@
 "use client";
 import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { Components } from 'react-markdown'
+
+const MD: Components = {
+  h1: ({ children }) => <h1 className="text-lg font-bold text-gray-900 mt-4 mb-1">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-base font-semibold text-gray-800 mt-4 mb-1">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-semibold text-gray-800 mt-3 mb-0.5">{children}</h3>,
+  ul: ({ children }) => <ul className="list-disc list-outside pl-5 my-2 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-outside pl-5 my-2 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li className="text-gray-700 leading-relaxed">{children}</li>,
+  p: ({ children }) => <p className="text-gray-700 leading-relaxed my-1.5">{children}</p>,
+  strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+  em: ({ children }) => <em className="italic text-gray-700">{children}</em>,
+  a: ({ href, children }) => <a href={href} className="text-brand-blue underline hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>,
+  code: ({ children, className }) => {
+    const isBlock = className?.includes('language-')
+    return isBlock
+      ? <code className="block bg-gray-100 text-gray-800 text-xs font-mono p-3 rounded-lg my-2 overflow-x-auto">{children}</code>
+      : <code className="bg-gray-100 text-gray-800 text-xs font-mono px-1.5 py-0.5 rounded">{children}</code>
+  },
+  pre: ({ children }) => <pre className="my-2">{children}</pre>,
+  blockquote: ({ children }) => <blockquote className="border-l-4 border-blue-200 pl-3 my-2 text-gray-600 italic">{children}</blockquote>,
+  hr: () => <hr className="my-3 border-gray-200" />,
+}
 
 function Sidebar() {
   return (
@@ -266,8 +288,8 @@ export default function ChatbotPage() {
                         <span className="animate-bounce h-2 w-2 rounded-full bg-brand-blue opacity-60" style={{ animationDelay: '300ms' }} />
                       </span>
                     ) : (
-                      <div className="prose prose-sm max-w-none prose-headings:font-semibold prose-headings:text-gray-800 prose-a:text-brand-blue prose-code:bg-gray-100 prose-code:px-1 prose-code:rounded prose-pre:bg-gray-100 prose-pre:rounded-lg prose-li:my-0">
-                        <ReactMarkdown>{m.content}</ReactMarkdown>
+                      <div className="text-sm text-gray-700">
+                        <ReactMarkdown components={MD}>{m.content}</ReactMarkdown>
                         {m.streaming && <Cursor />}
                       </div>
                     )}
