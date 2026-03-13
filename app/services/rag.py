@@ -61,6 +61,26 @@ _RECOMMENDATIONS_JSON = _RECOMMENDATIONS + """
 Return your answer as a JSON object with this exact schema:
 {"top_improvements": [{"feature": "feature name", "evidence_count": 3, "priority": "high|medium|low"}], "emerging_patterns": ["pattern 1", "pattern 2"], "strengths_to_preserve": ["strength 1", "strength 2"]}"""
 
+_EMPTY_JSON_BY_MODE: dict[str, dict] = {
+    "support_bot": {
+        "summary": "No relevant information found.", "issue_type": "other",
+        "severity": "low", "suggested_resolution": "Please check available data.",
+        "next_steps": [], "escalation_required": False, "confidence": 0.0,
+    },
+    "support_agent": {
+        "summary": "No customer history found.", "issue_type": "other",
+        "severity": "low", "suggested_resolution": "Collect more context from the customer.",
+        "next_steps": [], "escalation_required": False, "confidence": 0.0,
+    },
+    "sales_copilot": {
+        "competitor_weaknesses": [], "our_strengths": [],
+        "objection_handlers": [], "recommended_pitch_angle": "Insufficient data to generate pitch.",
+    },
+    "recommendations": {
+        "top_improvements": [], "emerging_patterns": [], "strengths_to_preserve": [],
+    },
+}
+
 MODE_CONFIG: dict[str, dict] = {
     "support_bot": {
         "indices": [COMPANY_INDEX, HISTORY_INDEX],
@@ -165,9 +185,7 @@ async def rag_query(
 
     if not top_hits:
         empty_answer: str | dict = (
-            {"summary": "No relevant information found.", "issue_type": "other",
-             "severity": "low", "suggested_resolution": "Please check available data.",
-             "next_steps": [], "escalation_required": False, "confidence": 0.0}
+            _EMPTY_JSON_BY_MODE.get(mode, {"answer": "No relevant information found."})
             if output_format == "json" else
             "I couldn't find relevant information to answer your question."
         )

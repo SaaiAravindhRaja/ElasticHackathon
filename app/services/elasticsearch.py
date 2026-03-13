@@ -13,7 +13,7 @@ def get_es_client() -> AsyncElasticsearch:
     if _es_client is None:
         settings = get_settings()
         _es_client = AsyncElasticsearch(
-            cloud_id=settings.es_cloud_id,
+            hosts=[settings.es_url],
             api_key=settings.es_api_key,
             request_timeout=30,
             max_retries=3,

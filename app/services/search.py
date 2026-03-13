@@ -27,42 +27,23 @@ def _build_filter_clauses(filters: dict) -> list[dict]:
     return clauses
 
 
-def _make_recency_function_score(base_query: dict) -> dict:
+def _apply_recency_boost(base_query: dict) -> dict:
     """
-    Wrap a query in function_score with gaussian date decay.
-    Documents < 7 days old keep full score; half-life at 37 days.
-    ES silently ignores gauss functions for docs missing the date/timestamp field,
-    so this is safe to apply across all indices.
+    Boost recent documents using bool/should range queries.
+    function_score and per-clause boost are not supported inside RRF standard
+    retrievers on ES Serverless. Plain should/range clauses contribute +1 to the
+    BM25 score for each matched window, nudging recent docs higher before RRF fusion.
+    Safe across all indices — ES ignores ranges on missing fields.
     """
     return {
-        "function_score": {
-            "query": base_query,
-            "functions": [
-                {
-                    "gauss": {
-                        "date": {
-                            "origin": "now",
-                            "scale": "30d",
-                            "offset": "7d",
-                            "decay": 0.5,
-                        }
-                    },
-                    "weight": 1.5,
-                },
-                {
-                    "gauss": {
-                        "timestamp": {
-                            "origin": "now",
-                            "scale": "30d",
-                            "offset": "7d",
-                            "decay": 0.5,
-                        }
-                    },
-                    "weight": 1.5,
-                },
+        "bool": {
+            "must": [base_query],
+            "should": [
+                {"range": {"date":      {"gte": "now-7d/d"}}},
+                {"range": {"timestamp": {"gte": "now-7d/d"}}},
+                {"range": {"date":      {"gte": "now-30d/d"}}},
+                {"range": {"timestamp": {"gte": "now-30d/d"}}},
             ],
-            "score_mode": "max",
-            "boost_mode": "multiply",
         }
     }
 
@@ -119,7 +100,7 @@ async def hybrid_search(
         bm25_query = base_bm25
 
     if boost_recency:
-        bm25_query = _make_recency_function_score(bm25_query)
+        bm25_query = _apply_recency_boost(bm25_query)
 
     # kNN retriever — optionally filtered
     knn_block: dict = {

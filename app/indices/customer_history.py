@@ -1,10 +1,6 @@
 INDEX_NAME = "customer-history-index"
 
 MAPPING = {
-    "settings": {
-        "number_of_shards": 1,
-        "number_of_replicas": 0,
-    },
     "mappings": {
         "properties": {
             "source_type": {"type": "keyword"},

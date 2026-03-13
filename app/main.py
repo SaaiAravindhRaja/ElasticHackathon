@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from app.services.elasticsearch import get_es_client, close_es_client, ensure_index
 from app.indices.company_knowledge import INDEX_NAME as COMPANY_INDEX, MAPPING as COMPANY_MAPPING
@@ -63,6 +64,12 @@ app.include_router(search_router.router)
 app.include_router(ai_router.router)
 app.include_router(analytics_router.router)
 app.include_router(alerts_router.router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error on {request.method} {request.url}: {exc}", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": str(exc) or "Internal server error"})
 
 
 @app.get("/health", tags=["meta"])

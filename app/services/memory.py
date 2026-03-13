@@ -2,6 +2,7 @@
 In-memory conversation store for multi-turn RAG sessions.
 Conversations expire after 30 minutes of inactivity.
 """
+import json
 import uuid
 import logging
 from datetime import datetime, timezone, timedelta
@@ -42,7 +43,7 @@ def append_turn(conversation_id: str, question: str, answer: str) -> None:
     entry = _store[conversation_id]
     entry["messages"].extend([
         {"role": "user", "content": question},
-        {"role": "assistant", "content": answer if isinstance(answer, str) else str(answer)},
+        {"role": "assistant", "content": answer if isinstance(answer, str) else json.dumps(answer, ensure_ascii=False)},
     ])
     entry["updated_at"] = _now()
 
