@@ -19,6 +19,7 @@ async def ingest_documents_json(payload: DocumentIngestRequest):
         text=payload.text,
         doc_type=payload.doc_type,
         source_url=payload.source_url,
+        company_name=payload.company_name,
         metadata=payload.metadata,
     )
     return DocumentIngestResponse(

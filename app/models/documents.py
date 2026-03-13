@@ -7,6 +7,7 @@ class DocumentIngestRequest(BaseModel):
     text: str
     doc_type: str = "general"
     source_url: str | None = None
+    company_name: str | None = None
     metadata: dict[str, Any] | None = None
 
 

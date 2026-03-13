@@ -46,7 +46,6 @@
 //
 // ======================================================
 
-
 import { spawn } from "child_process";
 import {
   TranscribeStreamingClient,
@@ -69,11 +68,15 @@ const CHUNK_SIZE = Math.floor(
   (CHUNK_MS / 1000) * SAMPLE_RATE * BYTES_PER_SAMPLE * CHANNELS
 );
 
-// CHANGE THIS if your mic name is different
+// Change if needed
 const MICROPHONE_NAME = "Microphone (Realtek(R) Audio)";
 
-// Nova Lite model
+// Bedrock model
 const MODEL_ID = "amazon.nova-lite-v1:0";
+
+// Backend from test.md
+const BACKEND_BASE_URL = "http://localhost:8000";
+const SEARCH_TOP_K = 5;
 
 const transcribeClient = new TranscribeStreamingClient({
   region: REGION,
@@ -106,6 +109,11 @@ const ffmpeg = spawn(
   { stdio: ["ignore", "pipe", "inherit"] }
 );
 
+ffmpeg.on("error", (err) => {
+  console.error("Failed to start ffmpeg:", err.message);
+  process.exit(1);
+});
+
 async function* audioStream() {
   let buffer = Buffer.alloc(0);
 
@@ -129,14 +137,15 @@ async function extractIssues(text) {
   const prompt = `
 You analyze customer speech transcripts.
 
-Return ONLY JSON:
-
+Return ONLY strict JSON in this exact format:
 {"issues":["issue1","issue2"]}
 
 Rules:
-- Only explicit problems or complaints
-- No explanation
-- Empty list if none
+- Only explicit customer problems, complaints, or pain points.
+- Keep each issue short and concrete.
+- No explanation.
+- Empty list if none.
+- Do not infer aggressively.
 
 Transcript:
 ${text}
@@ -166,11 +175,102 @@ ${text}
 
   try {
     const parsed = JSON.parse(output);
-    return parsed.issues || [];
+    return Array.isArray(parsed.issues)
+      ? parsed.issues.map((x) => String(x).trim()).filter(Boolean)
+      : [];
   } catch {
-    console.log("Model output:", output);
+    console.log("Model output was not valid JSON:", output);
     return [];
   }
+}
+
+function normalizeSearchResults(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.results)) return data.results;
+  if (Array.isArray(data.hits)) return data.hits;
+  if (Array.isArray(data.items)) return data.items;
+  return [];
+}
+
+function printBackendResults(issue, results) {
+  console.log(`\n[ELASTIC SEARCH] Issue query: ${issue}`);
+
+  if (!results.length) {
+    console.log("No backend matches found.\n");
+    return;
+  }
+
+  results.forEach((item, idx) => {
+    const title =
+      item.title ||
+      item.subject ||
+      item.customer_id ||
+      item.company_name ||
+      "Untitled";
+
+    const score =
+      item.score ??
+      item._score ??
+      item.relevance_score ??
+      "n/a";
+
+    const snippet =
+      item.highlight ||
+      item.snippet ||
+      item.raw_text ||
+      item.text ||
+      item.review_text ||
+      "";
+
+    console.log(`Result ${idx + 1}: ${title}`);
+    console.log(`Score: ${score}`);
+    if (snippet) {
+      console.log(`Snippet: ${String(snippet).slice(0, 300)}`);
+    }
+    console.log("");
+  });
+}
+
+async function searchCustomers(issue) {
+  const url = new URL("/search/customers", BACKEND_BASE_URL);
+  url.searchParams.set("q", issue);
+  url.searchParams.set("top_k", String(SEARCH_TOP_K));
+
+  const response = await fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend /search/customers failed: ${response.status}`);
+  }
+
+  const data = await response.json();
+  return normalizeSearchResults(data);
+}
+
+// Optional richer query if you want AI backend output instead of plain search
+async function querySupportAgent(question) {
+  const response = await fetch(`${BACKEND_BASE_URL}/ai/query`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify({
+      question,
+      mode: "support_agent",
+      output_format: "text",
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Backend /ai/query failed: ${response.status}`);
+  }
+
+  return response.json();
 }
 
 const seen = new Set();
@@ -181,7 +281,10 @@ async function handleFinalTranscript(text) {
 
   const issues = await extractIssues(text);
 
-  if (!issues.length) return;
+  if (!issues.length) {
+    console.log("Issues: none\n");
+    return;
+  }
 
   for (const issue of issues) {
     const key = issue.toLowerCase();
@@ -189,11 +292,33 @@ async function handleFinalTranscript(text) {
 
     seen.add(key);
     console.log(`🚨 ISSUE: ${issue}`);
+
+    try {
+      const results = await searchCustomers(issue);
+      printBackendResults(issue, results);
+    } catch (err) {
+      console.error("Customer search failed:", err.message);
+    }
+
+    // Uncomment this block if you also want the backend AI summary
+    /*
+    try {
+      const ai = await querySupportAgent(
+        `Customer issue: ${issue}. Original transcript: ${text}`
+      );
+      console.log("[SUPPORT_AGENT OUTPUT]");
+      console.log(JSON.stringify(ai, null, 2));
+      console.log("");
+    } catch (err) {
+      console.error("AI query failed:", err.message);
+    }
+    */
   }
 }
 
 async function main() {
   console.log("Starting transcription...");
+  console.log(`Backend: ${BACKEND_BASE_URL}`);
   console.log("Speak into microphone.\n");
 
   const command = new StartStreamTranscriptionCommand({
@@ -211,7 +336,7 @@ async function main() {
     const results = event.TranscriptEvent?.Transcript?.Results || [];
 
     for (const result of results) {
-      const text = result.Alternatives?.[0]?.Transcript || "";
+      const text = result.Alternatives?.[0]?.Transcript?.trim() || "";
       if (!text) continue;
 
       if (result.IsPartial) {
@@ -224,4 +349,8 @@ async function main() {
   }
 }
 
-main();
+main().catch((err) => {
+  console.error("\nFatal error:");
+  console.error(err);
+  process.exit(1);
+});
