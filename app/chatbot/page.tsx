@@ -1,8 +1,31 @@
 "use client";
 import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
+import ReactMarkdown, { Components } from 'react-markdown'
 
 const API = 'http://localhost:8000'
+
+const MD: Components = {
+  h1: ({ children }) => <h1 className="text-lg font-bold text-gray-900 mt-4 mb-1">{children}</h1>,
+  h2: ({ children }) => <h2 className="text-base font-semibold text-gray-800 mt-4 mb-1">{children}</h2>,
+  h3: ({ children }) => <h3 className="text-sm font-semibold text-gray-800 mt-3 mb-0.5">{children}</h3>,
+  ul: ({ children }) => <ul className="list-disc list-outside pl-5 my-2 space-y-0.5">{children}</ul>,
+  ol: ({ children }) => <ol className="list-decimal list-outside pl-5 my-2 space-y-0.5">{children}</ol>,
+  li: ({ children }) => <li className="text-gray-700 leading-relaxed">{children}</li>,
+  p: ({ children }) => <p className="text-gray-700 leading-relaxed my-1.5">{children}</p>,
+  strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+  em: ({ children }) => <em className="italic text-gray-700">{children}</em>,
+  a: ({ href, children }) => <a href={href} className="text-brand-blue underline hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>,
+  code: ({ children, className }) => {
+    const isBlock = className?.includes('language-')
+    return isBlock
+      ? <code className="block bg-gray-100 text-gray-800 text-xs font-mono p-3 rounded-lg my-2 overflow-x-auto">{children}</code>
+      : <code className="bg-gray-100 text-gray-800 text-xs font-mono px-1.5 py-0.5 rounded">{children}</code>
+  },
+  pre: ({ children }) => <pre className="my-2">{children}</pre>,
+  blockquote: ({ children }) => <blockquote className="border-l-4 border-blue-200 pl-3 my-2 text-gray-600 italic">{children}</blockquote>,
+  hr: () => <hr className="my-3 border-gray-200" />,
+}
 
 function Sidebar() {
   return (
@@ -49,8 +72,12 @@ function AccountContext() {
       <div className="card p-4">
         <div className="text-sm text-gray-600">RELEVANT DOCS</div>
         <div className="mt-2 space-y-2 text-sm">
-          <div className="flex items-center justify-between rounded border px-3 py-2">Pricing_Tier_2024.pdf<span>📄</span></div>
-          <div className="flex items-center justify-between rounded border px-3 py-2">Enterprise_Security.pdf<span>📄</span></div>
+          <div className="flex items-center justify-between rounded border px-3 py-2">
+            Pricing_Tier_2024.pdf<span>📄</span>
+          </div>
+          <div className="flex items-center justify-between rounded border px-3 py-2">
+            Enterprise_Security.pdf<span>📄</span>
+          </div>
         </div>
       </div>
     </aside>
@@ -73,14 +100,16 @@ interface Message {
 
 export default function ChatbotPage() {
   const [value, setValue] = useState('')
+  const [loading, setLoading] = useState(false)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'ai',
-      content: 'Hi! I\'m your Auralytics AI support assistant. I have access to Zendesk help documentation, company knowledge, and historical support data. How can I help you today?',
+      content: "Hi! I'm your Auralytics AI support assistant. I have access to Zendesk help documentation, company knowledge, and historical support data. How can I help you today?",
     }
   ])
   const bottomRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -88,12 +117,16 @@ export default function ChatbotPage() {
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!value.trim()) return
-
     const userMsg = value.trim()
-    setValue('')
+    if (!userMsg || loading) return
 
-    // Add user message + loading placeholder
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    setValue('')
+    setLoading(true)
+
     setMessages(prev => [
       ...prev,
       { role: 'user', content: userMsg },
@@ -109,6 +142,7 @@ export default function ChatbotPage() {
           mode: 'support_bot',
           ...(conversationId ? { conversation_id: conversationId } : {}),
         }),
+        signal: controller.signal,
       })
 
       if (!res.ok) throw new Error(`API error ${res.status}`)
@@ -122,7 +156,7 @@ export default function ChatbotPage() {
       }))
 
       setMessages(prev => [
-        ...prev.slice(0, -1), // remove loading
+        ...prev.slice(0, -1),
         {
           role: 'ai',
           content: data.answer || 'No answer returned.',
@@ -130,22 +164,27 @@ export default function ChatbotPage() {
         },
       ])
     } catch (err) {
+      if ((err as { name?: string }).name === 'AbortError') return
       setMessages(prev => [
         ...prev.slice(0, -1),
         {
           role: 'ai',
-          content: 'Sorry, I couldn\'t reach the backend. Please check that the server is running on localhost:8000.',
+          content: "Sorry, I couldn't reach the backend. Please check that the server is running on localhost:8000.",
           error: true,
         },
       ])
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
     <div className="flex gap-6 h-[calc(100vh-120px)]">
       <Sidebar />
-      <section className="flex-1 flex flex-col space-y-4">
-        <div className="flex items-center justify-between">
+
+      <section className="flex-1 flex flex-col space-y-4 min-h-0">
+        {/* Header */}
+        <div className="flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="text-lg font-semibold">Auralytics Support Bot</div>
             <span className="pill bg-green-50 text-green-600">AI Active</span>
@@ -165,29 +204,37 @@ export default function ChatbotPage() {
           </div>
         </div>
 
+        {/* Messages */}
         <div className="flex-1 overflow-y-auto space-y-4 pr-2">
           {messages.map((m, i) => (
-            <div key={i} className={`mx-auto max-w-2xl ${m.role === 'user' ? 'flex justify-end' : ''}`}>
+            <div
+              key={i}
+              className={`mx-auto max-w-2xl ${m.role === 'user' ? 'flex justify-end' : ''}`}
+            >
               {m.role === 'user' ? (
                 <div className="max-w-xl rounded-2xl bg-brand-blue px-4 py-3 text-white shadow-sm">
                   {m.content}
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <div className="text-[11px] font-semibold tracking-wide text-gray-500">AURALYTICS INTELLIGENT RAG</div>
+                  <div className="text-[11px] font-semibold tracking-wide text-gray-500">
+                    AURALYTICS INTELLIGENT RAG
+                  </div>
                   <div className={`card mt-2 space-y-2 p-4 text-sm shadow-sm ${m.error ? 'border-red-200 bg-red-50' : 'border-blue-100'}`}>
                     {m.loading ? (
                       <div className="flex items-center gap-2 text-gray-400">
                         <div className="flex gap-1">
-                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce opacity-60" style={{ animationDelay: '0ms' }}></span>
+                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce opacity-60" style={{ animationDelay: '150ms' }}></span>
+                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce opacity-60" style={{ animationDelay: '300ms' }}></span>
                         </div>
                         <span className="text-xs">Searching knowledge base...</span>
                       </div>
                     ) : (
                       <>
-                        <div className="whitespace-pre-wrap">{m.content}</div>
+                        <div className="text-sm text-gray-700">
+                          <ReactMarkdown components={MD}>{m.content}</ReactMarkdown>
+                        </div>
                         {m.citations && m.citations.length > 0 && (
                           <div className="mt-2 border-t pt-2">
                             <div className="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">Sources</div>
@@ -203,6 +250,15 @@ export default function ChatbotPage() {
                       </>
                     )}
                   </div>
+                  {m.upsell && (
+                    <div className="mt-3 rounded-xl bg-blue-50 p-4 text-sm border border-blue-100">
+                      <div>{m.upsell}</div>
+                      <div className="mt-3 flex gap-2">
+                        <button className="btn btn-primary px-4 py-2">Talk to an Agent</button>
+                        <button className="btn btn-outline px-4 py-2 bg-white">Not now</button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -210,28 +266,46 @@ export default function ChatbotPage() {
           <div ref={bottomRef} />
         </div>
 
-        <form onSubmit={handleSend} className="sticky bottom-0 mt-6 border-t bg-gray-50 pt-3">
+        {/* Input */}
+        <form onSubmit={handleSend} className="sticky bottom-0 shrink-0 border-t bg-gray-50 pt-3">
           <div className="mx-auto flex max-w-2xl items-center gap-2 rounded-full border bg-white px-3 py-2 shadow-sm focus-within:ring-2 focus-within:ring-blue-100 transition-all">
-            <button type="button" className="text-xl hover:bg-gray-100 h-8 w-8 rounded-full transition">＋</button>
+            <button type="button" className="text-xl hover:bg-gray-100 h-8 w-8 rounded-full transition">
+              ＋
+            </button>
             <input
               value={value}
               onChange={e => setValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSend(e)
+                }
+              }}
               placeholder="Ask anything — e.g. 'How do I reset my password?'"
               className="flex-1 outline-none bg-transparent py-1"
+              disabled={loading}
             />
             <button
               type="submit"
-              disabled={!value.trim()}
+              disabled={!value.trim() || loading}
               className="grid h-9 w-9 place-items-center rounded-full bg-brand-blue text-white disabled:opacity-50 hover:opacity-90 transition active:scale-95"
             >
-              ➤
+              {loading ? (
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                </svg>
+              ) : (
+                '➤'
+              )}
             </button>
           </div>
           <div className="mt-1 text-center text-[10px] text-gray-500">
-            Powered by ElasticSearch RRF hybrid search + GPT-4o-mini · {conversationId ? `Session: ${conversationId.slice(0, 8)}...` : 'New session'}
+            Powered by ElasticSearch RRF hybrid search · {conversationId ? `Session: ${conversationId.slice(0, 8)}...` : 'New session'}
           </div>
         </form>
       </section>
+
       <AccountContext />
     </div>
   )
