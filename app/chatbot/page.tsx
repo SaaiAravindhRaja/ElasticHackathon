@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { useState, useRef, useEffect } from 'react'
 import ReactMarkdown, { Components } from 'react-markdown'
 
+const API = 'http://localhost:8000'
+
 const MD: Components = {
   h1: ({ children }) => <h1 className="text-lg font-bold text-gray-900 mt-4 mb-1">{children}</h1>,
   h2: ({ children }) => <h2 className="text-base font-semibold text-gray-800 mt-4 mb-1">{children}</h2>,
@@ -38,9 +40,9 @@ function Sidebar() {
         </div>
         <nav className="space-y-2">
           <div className="bg-blue-50 text-brand-blue rounded-lg px-3 py-2">Home</div>
-          <div className="rounded-lg px-3 py-2 hover:bg-gray-100">Chat History</div>
-          <div className="rounded-lg px-3 py-2 hover:bg-gray-100">Help Center</div>
-          <div className="rounded-lg px-3 py-2 hover:bg-gray-100">Settings</div>
+          <div className="rounded-lg px-3 py-2 hover:bg-gray-100 cursor-pointer">Chat History</div>
+          <div className="rounded-lg px-3 py-2 hover:bg-gray-100 cursor-pointer">Help Center</div>
+          <div className="rounded-lg px-3 py-2 hover:bg-gray-100 cursor-pointer">Settings</div>
         </nav>
         <div className="mt-6">
           <button className="btn btn-primary w-full py-2">Speak to an Agent</button>
@@ -82,43 +84,30 @@ function AccountContext() {
   )
 }
 
+interface Source {
+  title: string
+  score?: number
+}
+
 interface Message {
   role: 'user' | 'ai'
   content: string
-  citations?: string[]
+  citations?: Source[]
   upsell?: string
-  isError?: boolean
-  streaming?: boolean
-}
-
-/** Streaming cursor blink animation */
-function Cursor() {
-  return (
-    <span
-      className="inline-block w-[2px] h-[1em] bg-gray-700 align-middle ml-0.5 animate-pulse"
-      aria-hidden
-    />
-  )
+  loading?: boolean
+  error?: boolean
 }
 
 export default function ChatbotPage() {
   const [value, setValue] = useState('')
   const [loading, setLoading] = useState(false)
+  const [conversationId, setConversationId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([
     {
-      role: 'user',
-      content: 'What features are included in the Enterprise plan for high-volume API access?',
-    },
-    {
       role: 'ai',
-      content:
-        'Based on our documentation, the Enterprise plan is specifically designed for high-scale operations. It includes:\n\n• Priority API access with guaranteed 99.99% uptime SLA\n• Unlimited seats and custom workspace permissions\n• Dedicated success manager and 24/7 technical support',
-      citations: ['Pricing Doc', 'Enterprise SLA'],
-      upsell:
-        'I noticed your current volume is averaging 450k requests/mo. Our Enterprise plan saves you 20% compared to your current Pay-As-You-Go pricing. Would you like to talk to a human specialist about transitioning?',
-    },
+      content: "Hi! I'm your Auralytics AI support assistant. I have access to Zendesk help documentation, company knowledge, and historical support data. How can I help you today?",
+    }
   ])
-
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
@@ -128,115 +117,62 @@ export default function ChatbotPage() {
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault()
-    const input = value.trim()
-    if (!input || loading) return
+    const userMsg = value.trim()
+    if (!userMsg || loading) return
 
-    // Cancel any in-flight request
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
-    setMessages(prev => [...prev, { role: 'user', content: input }])
     setValue('')
     setLoading(true)
 
-    // Add a placeholder AI message that we'll stream into
-    const aiIndex = messages.length + 1 // +1 for the user message we just added
     setMessages(prev => [
       ...prev,
-      { role: 'ai', content: '', streaming: true },
+      { role: 'user', content: userMsg },
+      { role: 'ai', content: '', loading: true },
     ])
 
     try {
-      const res = await fetch('/api/converse', {
+      const res = await fetch(`${API}/ai/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input }),
+        body: JSON.stringify({
+          question: userMsg,
+          mode: 'support_bot',
+          ...(conversationId ? { conversation_id: conversationId } : {}),
+        }),
         signal: controller.signal,
       })
 
-      if (!res.ok) {
-        const data = await res.json()
-        setMessages(prev => {
-          const copy = [...prev]
-          copy[copy.length - 1] = {
-            role: 'ai',
-            content: `⚠️ Error (${res.status}): ${data.detail ?? data.error ?? 'Unknown error'}`,
-            isError: true,
-          }
-          return copy
-        })
-        return
-      }
+      if (!res.ok) throw new Error(`API error ${res.status}`)
+      const data = await res.json()
 
-      // ── Read SSE stream ────────────────────────────────────────────────────
-      const reader = res.body!.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let citations: string[] = []
+      if (data.conversation_id) setConversationId(data.conversation_id)
 
-      while (true) {
-        const { done, value: chunk } = await reader.read()
-        if (done) break
+      const sources: Source[] = (data.sources || []).map((s: any) => ({
+        title: s.title || s.doc_type || 'Source',
+        score: s.score,
+      }))
 
-        buffer += decoder.decode(chunk, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? '' // keep incomplete last line
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const raw = line.slice(6).trim()
-          if (!raw || raw === '[DONE]') continue
-
-          let event: Record<string, unknown>
-          try {
-            event = JSON.parse(raw)
-          } catch {
-            continue
-          }
-
-          if (typeof event.token === 'string') {
-            // Append token to the last message
-            setMessages(prev => {
-              const copy = [...prev]
-              const last = copy[copy.length - 1]
-              copy[copy.length - 1] = {
-                ...last,
-                content: last.content + event.token,
-                streaming: true,
-              }
-              return copy
-            })
-          }
-
-          if (event.done) {
-            citations = (event.citations as string[]) ?? []
-          }
-        }
-      }
-
-      // Mark streaming complete, attach final citations
-      setMessages(prev => {
-        const copy = [...prev]
-        const last = copy[copy.length - 1]
-        copy[copy.length - 1] = {
-          ...last,
-          streaming: false,
-          ...(citations.length > 0 ? { citations } : {}),
-        }
-        return copy
-      })
+      setMessages(prev => [
+        ...prev.slice(0, -1),
+        {
+          role: 'ai',
+          content: data.answer || 'No answer returned.',
+          citations: sources,
+        },
+      ])
     } catch (err) {
       if ((err as { name?: string }).name === 'AbortError') return
-      setMessages(prev => {
-        const copy = [...prev]
-        copy[copy.length - 1] = {
+      setMessages(prev => [
+        ...prev.slice(0, -1),
+        {
           role: 'ai',
-          content: `⚠️ Network error: ${err instanceof Error ? err.message : String(err)}`,
-          isError: true,
-        }
-        return copy
-      })
+          content: "Sorry, I couldn't reach the backend. Please check that the server is running on localhost:8000.",
+          error: true,
+        },
+      ])
     } finally {
       setLoading(false)
     }
@@ -252,10 +188,18 @@ export default function ChatbotPage() {
           <div className="flex items-center gap-3">
             <div className="text-lg font-semibold">Auralytics Support Bot</div>
             <span className="pill bg-green-50 text-green-600">AI Active</span>
-            <span className="pill bg-blue-50 text-brand-blue">Fast Response</span>
+            <span className="pill bg-blue-50 text-brand-blue">ElasticSearch RAG</span>
+            {conversationId && (
+              <span className="pill bg-purple-50 text-purple-600">Multi-Turn</span>
+            )}
           </div>
           <div className="flex items-center gap-3">
-            <button className="btn btn-outline px-3 py-1.5">End Session</button>
+            <button
+              className="btn btn-outline px-3 py-1.5"
+              onClick={() => { setMessages([{ role: 'ai', content: 'Session reset. How can I help you?' }]); setConversationId(null) }}
+            >
+              New Session
+            </button>
             <div className="h-8 w-8 rounded-full bg-gray-200"></div>
           </div>
         </div>
@@ -276,45 +220,36 @@ export default function ChatbotPage() {
                   <div className="text-[11px] font-semibold tracking-wide text-gray-500">
                     AURALYTICS INTELLIGENT RAG
                   </div>
-                  <div
-                    className={`card mt-2 space-y-2 p-4 text-sm shadow-sm ${m.isError ? 'border-red-200 bg-red-50' : 'border-blue-100'
-                      }`}
-                  >
-                    {/* Show placeholder dots before any tokens arrive */}
-                    {m.streaming && m.content === '' ? (
-                      <span className="inline-flex gap-1 items-center text-gray-400">
-                        <span className="animate-bounce h-2 w-2 rounded-full bg-brand-blue opacity-60" style={{ animationDelay: '0ms' }} />
-                        <span className="animate-bounce h-2 w-2 rounded-full bg-brand-blue opacity-60" style={{ animationDelay: '150ms' }} />
-                        <span className="animate-bounce h-2 w-2 rounded-full bg-brand-blue opacity-60" style={{ animationDelay: '300ms' }} />
-                      </span>
+                  <div className={`card mt-2 space-y-2 p-4 text-sm shadow-sm ${m.error ? 'border-red-200 bg-red-50' : 'border-blue-100'}`}>
+                    {m.loading ? (
+                      <div className="flex items-center gap-2 text-gray-400">
+                        <div className="flex gap-1">
+                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce opacity-60" style={{ animationDelay: '0ms' }}></span>
+                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce opacity-60" style={{ animationDelay: '150ms' }}></span>
+                          <span className="h-2 w-2 rounded-full bg-brand-blue animate-bounce opacity-60" style={{ animationDelay: '300ms' }}></span>
+                        </div>
+                        <span className="text-xs">Searching knowledge base...</span>
+                      </div>
                     ) : (
-                      <div className="text-sm text-gray-700">
-                        <ReactMarkdown components={MD}>{m.content}</ReactMarkdown>
-                        {m.streaming && <Cursor />}
-                      </div>
-                    )}
-
-                    {/* Citations — shown once streaming is done */}
-                    {!m.streaming && m.citations && m.citations.length > 0 && (
-                      <div className="mt-2 border-t pt-2">
-                        <div className="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">
-                          Citations
+                      <>
+                        <div className="text-sm text-gray-700">
+                          <ReactMarkdown components={MD}>{m.content}</ReactMarkdown>
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-2">
-                          {m.citations.map((c, ci) => (
-                            <Link
-                              key={ci}
-                              href="#"
-                              className="pill bg-blue-50 text-brand-blue hover:bg-blue-100 transition"
-                            >
-                              Source: {c}
-                            </Link>
-                          ))}
-                        </div>
-                      </div>
+                        {m.citations && m.citations.length > 0 && (
+                          <div className="mt-2 border-t pt-2">
+                            <div className="text-[11px] font-semibold tracking-wide text-gray-500 uppercase">Sources</div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {m.citations.map((c, ci) => (
+                                <span key={ci} className="pill bg-blue-50 text-brand-blue">
+                                  📄 {c.title}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
-
                   {m.upsell && (
                     <div className="mt-3 rounded-xl bg-blue-50 p-4 text-sm border border-blue-100">
                       <div>{m.upsell}</div>
@@ -346,13 +281,10 @@ export default function ChatbotPage() {
                   handleSend(e)
                 }
               }}
-              placeholder="Type your message here..."
+              placeholder="Ask anything — e.g. 'How do I reset my password?'"
               className="flex-1 outline-none bg-transparent py-1"
               disabled={loading}
             />
-            <button type="button" className="text-xl hover:bg-gray-100 h-8 w-8 rounded-full transition">
-              🎤
-            </button>
             <button
               type="submit"
               disabled={!value.trim() || loading}
@@ -369,7 +301,7 @@ export default function ChatbotPage() {
             </button>
           </div>
           <div className="mt-1 text-center text-[10px] text-gray-500">
-            Auralytics AI can make mistakes. Check important info.
+            Powered by ElasticSearch RRF hybrid search · {conversationId ? `Session: ${conversationId.slice(0, 8)}...` : 'New session'}
           </div>
         </form>
       </section>

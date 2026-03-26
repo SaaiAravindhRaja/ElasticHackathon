@@ -254,26 +254,23 @@ Build the full intelligence report now. Use the real data above as evidence. Ret
         )
         return json.loads(response["body"].read())
 
-    # boto3 is sync — run it in a thread so we don't block the async event loop
     loop = asyncio.get_event_loop()
     bedrock_response = await loop.run_in_executor(None, _call_bedrock)
 
     raw = bedrock_response["output"]["message"]["content"][0]["text"]
 
-    # ── 5. Parse JSON from response ───────────────────────────────────────────
+    # ── 5. Parse JSON — strip trailing commas (common Nova quirk) ────────────
     def _clean_and_parse(text: str) -> dict:
-        # strip ```json ... ``` wrappers
         text = text.strip()
         m = re.search(r"```(?:json)?\s*([\s\S]+?)```", text)
         if m:
             text = m.group(1).strip()
-        # remove trailing commas before } or ] (common LLM quirk)
         text = re.sub(r",\s*([}\]])", r"\1", text)
         return json.loads(text)
 
     try:
         report = _clean_and_parse(raw)
-    except (json.JSONDecodeError, Exception):
+    except Exception:
         report = {"raw_output": raw}
 
     report["sources_used"] = len(top_hits)

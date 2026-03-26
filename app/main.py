@@ -2,6 +2,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.services.elasticsearch import get_es_client, close_es_client, ensure_index
 from app.indices.company_knowledge import INDEX_NAME as COMPANY_INDEX, MAPPING as COMPANY_MAPPING
@@ -58,6 +59,13 @@ app = FastAPI(
     ),
     version="3.0.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(ingest_router.router)
